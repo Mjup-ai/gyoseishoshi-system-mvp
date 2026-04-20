@@ -1,42 +1,45 @@
 export interface Staff {
   id: string;
   name: string;
-  role?: string;
-  attributes?: Record<string, string | number | boolean | null>;
+  nameKana?: string;
+  position?: string;
+  qualification?: string;
+  employmentType?: string;
+  weeklyHours?: number;
 }
 
 export interface ScheduleEntry {
-  id: string;
   staffId: string;
   date: string;
+  shiftType: string;
   startTime?: string;
   endTime?: string;
-  task?: string;
-  metadata?: Record<string, string | number | boolean | null>;
+  actualHours?: number;
 }
 
 export interface CommonModel {
   staff: Staff[];
-  scheduleEntries: ScheduleEntry[];
-}
-
-export interface RuleResult {
-  ruleId: string;
-  passed: boolean;
-  severity?: 'info' | 'warning' | 'error';
-  message: string;
-  relatedEntryIds?: string[];
+  schedule: ScheduleEntry[];
+  warnings: string[];
 }
 
 export interface InputMapping {
-  sourceField: string;
-  targetField: keyof Staff | keyof ScheduleEntry;
-  transform?: string;
-  required?: boolean;
+  name: string;
+  format: string;
+  sheet: string;
+  headerRow: number;
+  columnMapping: Record<string, string>;
+  shiftSymbols: Record<string, string>;
 }
 
 export interface OutputMapping {
-  sourceField: keyof CommonModel | string;
-  targetField: string;
-  format?: 'string' | 'number' | 'boolean' | 'date' | 'datetime';
+  sheet: string;
+  staffStartRow: number;
+  columns: Record<string, string>;
+}
+
+export interface RuleResult {
+  fullTimeEquivalent: number;
+  shiftTotals: Record<string, number>;
+  warnings: string[];
 }
