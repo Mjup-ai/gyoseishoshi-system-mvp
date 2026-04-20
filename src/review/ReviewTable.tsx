@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import type { CommonModel } from '../domain/types'
 import { buildReviewRows } from './buildReviewRows'
@@ -13,6 +13,10 @@ export function ReviewTable({ model, onConfirm }: Props) {
   const [draft, setDraft] = useState<Record<string, { weeklyHours: number; fte: number }>>(
     Object.fromEntries(rows.map((row) => [row.staffId, { weeklyHours: row.weeklyHours, fte: row.fte }])),
   )
+
+  useEffect(() => {
+    setDraft(Object.fromEntries(rows.map((row) => [row.staffId, { weeklyHours: row.weeklyHours, fte: row.fte }])))
+  }, [rows])
 
   const handleChange = (staffId: string, key: 'weeklyHours' | 'fte', value: string) => {
     setDraft((current) => ({
@@ -62,7 +66,7 @@ export function ReviewTable({ model, onConfirm }: Props) {
           ))}
         </tbody>
       </table>
-      <button className="confirm-button" onClick={() => onConfirm(draft)}>
+      <button className="confirm-button" disabled={rows.length === 0} onClick={() => onConfirm(draft)}>
         確定
       </button>
     </div>

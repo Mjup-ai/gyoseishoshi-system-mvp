@@ -26,6 +26,13 @@ export type CommonModel = {
   warnings: string[]
 }
 
+export const SHIFT_HOURS: Record<string, number> = {
+  日勤: 8,
+  夜勤: 16,
+  休み: 0,
+  有給: 0,
+}
+
 export type InputMapping = {
   name: string
   format: 'excel'

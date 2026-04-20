@@ -1,11 +1,5 @@
 import type { CommonModel, RuleResult, ScheduleEntry, Staff } from '../domain/types'
-
-const SHIFT_HOURS: Record<string, number> = {
-  日勤: 8,
-  夜勤: 16,
-  休み: 0,
-  有給: 0,
-}
+import { getShiftHours } from '../domain/shiftHours'
 
 function groupScheduleByStaff(schedule: ScheduleEntry[]) {
   return schedule.reduce<Record<string, ScheduleEntry[]>>((acc, entry) => {
@@ -18,7 +12,7 @@ function groupScheduleByStaff(schedule: ScheduleEntry[]) {
 function inferWeeklyHours(staff: Staff, entries: ScheduleEntry[]) {
   if (staff.weeklyHours) return staff.weeklyHours
 
-  const totalHours = entries.reduce((sum, entry) => sum + (entry.actualHours ?? SHIFT_HOURS[entry.shiftType] ?? 0), 0)
+  const totalHours = entries.reduce((sum, entry) => sum + getShiftHours(entry.shiftType, entry.actualHours), 0)
   return Number(((totalHours / 3) * 7).toFixed(1))
 }
 
@@ -41,7 +35,7 @@ export function applyRuleEngine(model: CommonModel): RuleResult {
     }
 
     entries.forEach((entry) => {
-      const actualHours = entry.actualHours ?? SHIFT_HOURS[entry.shiftType] ?? 0
+      const actualHours = getShiftHours(entry.shiftType, entry.actualHours)
       if (entry.shiftType === '日勤') dayHours += actualHours
       if (entry.shiftType === '夜勤') nightHours += actualHours
       if (entry.shiftType === '休み' || entry.shiftType === '有給') holidayCount += 1

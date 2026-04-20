@@ -1,6 +1,5 @@
-import yaml from 'js-yaml'
-
-import sampleOutputYaml from '../mappings/output/sample-gh-output.yaml?raw'
+import outputMappingYaml from '../mappings/output/output_mapping.yaml?raw'
+import { loadYaml } from './loadYaml'
 
 export type OutputMapping = {
   name: string
@@ -15,6 +14,6 @@ export type OutputMapping = {
   }
 }
 
-export function loadSampleOutputMapping(): OutputMapping {
-  return yaml.load(sampleOutputYaml) as OutputMapping
+export function loadOutputMapping(): OutputMapping {
+  return loadYaml<OutputMapping>(outputMappingYaml, 'output_mapping.yaml')
 }

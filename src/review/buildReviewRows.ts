@@ -1,4 +1,5 @@
 import type { CommonModel } from '../domain/types'
+import { getShiftHours } from '../domain/shiftHours'
 
 export type ReviewRow = {
   staffId: string
@@ -10,20 +11,10 @@ export type ReviewRow = {
   warnings: string[]
 }
 
-const SHIFT_HOURS: Record<string, number> = {
-  日勤: 8,
-  夜勤: 16,
-  休み: 0,
-  有給: 0,
-}
-
 export function buildReviewRows(model: CommonModel): ReviewRow[] {
   return model.staff.map((staff) => {
     const entries = model.schedule.filter((entry) => entry.staffId === staff.id)
-    const totalHours = entries.reduce(
-      (sum, entry) => sum + (entry.actualHours ?? SHIFT_HOURS[entry.shiftType] ?? 0),
-      0,
-    )
+    const totalHours = entries.reduce((sum, entry) => sum + getShiftHours(entry.shiftType, entry.actualHours), 0)
     const weeklyHours = Number((((staff.weeklyHours ?? totalHours / 3) * 7)).toFixed(1))
     const fte = Number((weeklyHours / 40).toFixed(2))
     const warnings = model.warnings.filter((warning) => warning.includes(staff.name))

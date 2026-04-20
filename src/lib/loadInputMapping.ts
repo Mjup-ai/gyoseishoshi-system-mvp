@@ -1,8 +1,7 @@
-import yaml from 'js-yaml'
-
 import type { InputMapping } from '../domain/types'
-import sampleGhYaml from '../mappings/input/sample-gh.yaml?raw'
+import inputMappingYaml from '../mappings/input/input_mapping.yaml?raw'
+import { loadYaml } from './loadYaml'
 
-export function loadSampleInputMapping(): InputMapping {
-  return yaml.load(sampleGhYaml) as InputMapping
+export function loadInputMapping(): InputMapping {
+  return loadYaml<InputMapping>(inputMappingYaml, 'input_mapping.yaml')
 }

@@ -1,4 +1,4 @@
-name: sample-gh-shift
+name: gh-shift
 format: excel
 sheet: シフト表
 headerRow: 1

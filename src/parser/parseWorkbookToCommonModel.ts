@@ -4,16 +4,29 @@ function columnLetterToIndex(letter: string) {
   return letter.toUpperCase().charCodeAt(0) - 65
 }
 
+function buildTargetIndexMap(mapping: InputMapping) {
+  return Object.entries(mapping.columnMapping).reduce<Record<string, number>>((acc, [column, target]) => {
+    acc[target] = columnLetterToIndex(column)
+    return acc
+  }, {})
+}
+
 export function parseWorkbookToCommonModel(rows: string[][], mapping: InputMapping): CommonModel {
   const staff: Staff[] = []
   const schedule: ScheduleEntry[] = []
   const warnings: string[] = []
 
+  const targetIndexMap = buildTargetIndexMap(mapping)
+  const nameIndex = targetIndexMap['staff.name']
+  const positionIndex = targetIndexMap['staff.position']
+
+  if (nameIndex == null) {
+    throw new Error('input_mapping.yaml に staff.name の列定義がありません')
+  }
+
   const dataRows = rows.slice(mapping.headerRow)
 
   dataRows.forEach((row, rowIndex) => {
-    const nameIndex = columnLetterToIndex('A')
-    const positionIndex = columnLetterToIndex('B')
     const name = row[nameIndex]?.trim()
 
     if (!name) {
@@ -25,7 +38,7 @@ export function parseWorkbookToCommonModel(rows: string[][], mapping: InputMappi
     staff.push({
       id: staffId,
       name,
-      position: row[positionIndex]?.trim() || undefined,
+      position: positionIndex == null ? undefined : row[positionIndex]?.trim() || undefined,
     })
 
     Object.entries(mapping.columnMapping).forEach(([column, target]) => {
