@@ -1,0 +1,9 @@
+name: sample-gh-output
+municipality: sample-city
+sheet: 勤務形態一覧表
+staffStartRow: 5
+columns:
+  name: A
+  position: B
+  weeklyHours: C
+  fte: D
