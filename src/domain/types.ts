@@ -1,53 +1,42 @@
-export type Staff = {
-  id: string
-  name: string
-  nameKana?: string
-  position?: string
-  qualification?: string
-  employmentType?: string
-  isDedicated?: boolean
-  weeklyHours?: number
-  startDate?: string
+export interface Staff {
+  id: string;
+  name: string;
+  role?: string;
+  attributes?: Record<string, string | number | boolean | null>;
 }
 
-export type ScheduleEntry = {
-  staffId: string
-  date: string
-  shiftType: string
-  startTime?: string
-  endTime?: string
-  breakMinutes?: number
-  actualHours?: number
+export interface ScheduleEntry {
+  id: string;
+  staffId: string;
+  date: string;
+  startTime?: string;
+  endTime?: string;
+  task?: string;
+  metadata?: Record<string, string | number | boolean | null>;
 }
 
-export type CommonModel = {
-  staff: Staff[]
-  schedule: ScheduleEntry[]
-  warnings: string[]
+export interface CommonModel {
+  staff: Staff[];
+  scheduleEntries: ScheduleEntry[];
 }
 
-export const SHIFT_HOURS: Record<string, number> = {
-  日勤: 8,
-  夜勤: 16,
-  休み: 0,
-  有給: 0,
+export interface RuleResult {
+  ruleId: string;
+  passed: boolean;
+  severity?: 'info' | 'warning' | 'error';
+  message: string;
+  relatedEntryIds?: string[];
 }
 
-export type InputMapping = {
-  name: string
-  format: 'excel'
-  sheet: string
-  headerRow: number
-  columnMapping: Record<string, string>
-  shiftSymbols: Record<string, string>
+export interface InputMapping {
+  sourceField: string;
+  targetField: keyof Staff | keyof ScheduleEntry;
+  transform?: string;
+  required?: boolean;
 }
 
-export type RuleResult = {
-  fullTimeEquivalent: number
-  shiftTotals: {
-    dayHours: number
-    nightHours: number
-    holidayCount: number
-  }
-  warnings: string[]
+export interface OutputMapping {
+  sourceField: keyof CommonModel | string;
+  targetField: string;
+  format?: 'string' | 'number' | 'boolean' | 'date' | 'datetime';
 }
