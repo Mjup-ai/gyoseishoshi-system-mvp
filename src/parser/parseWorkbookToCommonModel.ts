@@ -19,10 +19,10 @@ export function parseWorkbookToCommonModel(rows: string[][], mapping: InputMappi
 
     const nameIndex = nameCol ? columnLetterToIndex(nameCol) : 0;
     const posIndex = posCol ? columnLetterToIndex(posCol) : 1;
-    const name = row[nameIndex]?.trim();
+    const name = String(row[nameIndex] ?? '').trim();
 
     if (!name) {
-      if (row.some((c) => c.trim())) {
+      if (row.some((c) => String(c ?? '').trim())) {
         warnings.push(`行${rowIndex + mapping.headerRow + 1}: 氏名が空です`);
       }
       return;
@@ -32,13 +32,13 @@ export function parseWorkbookToCommonModel(rows: string[][], mapping: InputMappi
     staff.push({
       id: staffId,
       name,
-      position: row[posIndex]?.trim() || undefined,
+      position: String(row[posIndex] ?? '').trim() || undefined,
     });
 
     // スケジュール列を処理
     Object.entries(mapping.columnMapping).forEach(([column, target]) => {
       if (!target.startsWith('schedule.')) return;
-      const raw = row[columnLetterToIndex(column)]?.trim();
+      const raw = String(row[columnLetterToIndex(column)] ?? '').trim();
       if (!raw) return;
 
       const date = target.replace('schedule.', '');
