@@ -6,7 +6,8 @@ import { readWorkbookFile } from './parser/readWorkbookFile';
 import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel';
 import { applyRuleEngine } from './rules/applyRuleEngine';
 import { ReviewTable } from './review/ReviewTable';
-import { exportToWorkbook, exportWithTemplate, downloadWorkbook } from './exporter/exportToWorkbook';
+import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
+import { exportToMhlwTemplate } from './exporter/exportToMhlwTemplate';
 
 interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; }
 interface FacilityItem { id: string; name: string; facilityType?: string; inputMapping?: string; }
@@ -103,7 +104,7 @@ function App() {
   };
 
   const handleExport = async () => {
-    if (!confirmed) return;
+    if (!confirmed || !parsed) return;
     let buf: ArrayBuffer;
     const muniName = selectedMuni?.name || '出力';
 
@@ -113,7 +114,14 @@ function App() {
         const res = await apiFetch(`/api/municipalities/${selectedMuniId}/template/download`);
         if (res.ok) {
           const templateBuffer = await res.arrayBuffer();
-          buf = await exportWithTemplate({ templateBuffer, mapping: outputMapping, staff: staffList, confirmed });
+          // 厚労省テンプレ（勤務形態一覧表シートがある場合）は専用ロジック
+          buf = await exportToMhlwTemplate({
+            templateBuffer,
+            staff: staffList,
+            schedule: parsed.schedule,
+            confirmed,
+            facilityName: selectedFacility?.name,
+          });
         } else {
           buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
         }
