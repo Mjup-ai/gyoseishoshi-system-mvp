@@ -5,6 +5,8 @@ import { apiFetch } from './lib/api';
 import { readWorkbookFile } from './parser/readWorkbookFile';
 import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel';
 import { applyRuleEngine } from './rules/applyRuleEngine';
+import { calculateOfficialFte, DEFAULT_FTE_CONFIG } from './domain/fteRules';
+import type { FacilityFteResult } from './domain/fteRules';
 import { ReviewTable } from './review/ReviewTable';
 import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
 
@@ -80,6 +82,7 @@ function App() {
 
   const parsed = useMemo(() => (rows ? parseWorkbookToCommonModel(rows, inputMapping) : null), [rows, inputMapping]);
   const ruleResult: RuleResult | null = useMemo(() => (parsed ? applyRuleEngine(parsed) : null), [parsed]);
+  const officialFte: FacilityFteResult | null = useMemo(() => (parsed ? calculateOfficialFte(parsed, DEFAULT_FTE_CONFIG) : null), [parsed]);
   const staffList = useMemo<Staff[]>(() => parsed?.staff ?? [], [parsed]);
 
   const handleFile = async (file?: File) => {
@@ -270,32 +273,54 @@ function App() {
                 <button onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline">← ファイル変更</button>
               </div>
 
-              {/* サマリー */}
-              <div className="grid grid-cols-4 gap-3 mb-6">
-                <div className="rounded-lg bg-slate-50 p-3 text-center">
-                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.fullTimeEquivalent}</div>
-                  <div className="text-xs text-slate-500">常勤換算合計</div>
-                </div>
-                <div className="rounded-lg bg-slate-50 p-3 text-center">
-                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.totalDayHours}h</div>
-                  <div className="text-xs text-slate-500">日勤時間</div>
-                </div>
-                <div className="rounded-lg bg-slate-50 p-3 text-center">
-                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.totalNightHours}h</div>
-                  <div className="text-xs text-slate-500">夜勤時間</div>
-                </div>
-                <div className="rounded-lg bg-slate-50 p-3 text-center">
-                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.totalHolidayCount}</div>
-                  <div className="text-xs text-slate-500">休日数</div>
-                </div>
-              </div>
+              {/* 公式FTE計算結果 */}
+              {officialFte && (
+                <>
+                  <div className="grid grid-cols-4 gap-3 mb-4">
+                    <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-center">
+                      <div className="text-2xl font-bold text-blue-800">{officialFte.totalFte}</div>
+                      <div className="text-xs text-blue-600 font-medium">常勤換算合計</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3 text-center">
+                      <div className="text-xl font-bold text-slate-800">{officialFte.staffDetails.filter(d => !d.excluded).length}</div>
+                      <div className="text-xs text-slate-500">算入対象者</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3 text-center">
+                      <div className="text-xl font-bold text-slate-800">{officialFte.standardWeeklyHours}h</div>
+                      <div className="text-xs text-slate-500">常勤基準（週）</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3 text-center">
+                      <div className="text-xl font-bold text-slate-800">{officialFte.standardMonthlyHours}h</div>
+                      <div className="text-xs text-slate-500">常勤基準（月）</div>
+                    </div>
+                  </div>
+
+                  {/* 職種別集計 */}
+                  <div className="rounded-lg bg-slate-50 p-3 mb-4">
+                    <div className="text-xs font-semibold text-slate-600 mb-2">職種別常勤換算</div>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.entries(officialFte.positionTotals).map(([pos, data]) => (
+                        <span key={pos} className="text-xs bg-white rounded px-2 py-1 border border-slate-200">
+                          {pos}: {data.fte}（{data.count}名）
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 計算根拠 */}
+                  <details className="mb-4">
+                    <summary className="text-xs text-blue-600 cursor-pointer font-medium">計算根拠を表示</summary>
+                    <pre className="mt-2 text-xs text-slate-600 bg-slate-50 rounded p-3 whitespace-pre-wrap">{officialFte.basis}</pre>
+                  </details>
+                </>
+              )}
 
               {/* 警告 */}
-              {ruleResult.warnings.length > 0 && (
+              {officialFte && officialFte.warnings.length > 0 && (
                 <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-6">
                   <div className="text-sm font-semibold text-amber-800 mb-1">⚠ 警告</div>
                   <ul className="text-sm text-amber-700 space-y-1">
-                    {ruleResult.warnings.map((w, i) => <li key={i}>・{w}</li>)}
+                    {officialFte.warnings.map((w, i) => <li key={i}>・{w}</li>)}
                   </ul>
                 </div>
               )}
