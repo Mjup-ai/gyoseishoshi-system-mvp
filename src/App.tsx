@@ -360,7 +360,7 @@ function App() {
                       ))}
                     </select>
                   </div>
-                  <div className="w-28">
+                  <div className="w-40">
                     <label className="text-xs text-slate-500">利用者数</label>
                     <input
                       type="number"
@@ -369,6 +369,7 @@ function App() {
                       className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm mt-1"
                       min={1}
                     />
+                    <p className="text-[10px] text-slate-400 mt-0.5">※前月末の利用者数または直近の平均利用者数（自治体の指示に従ってください）</p>
                   </div>
                 </div>
 
