@@ -166,14 +166,21 @@ export function getSupportedServices(): ServiceStandard[] {
   return SERVICE_STANDARDS.filter(s => s.supported);
 }
 
+/** 判定の4段階 */
+export type ComplianceLevel = 'compliant' | 'review' | 'unsupported' | 'non_compliant';
+// compliant: 🟢 適合（基準充足）
+// review: 🟡 要確認（基準ギリギリ or 解釈確認必要）
+// unsupported: ⚪ 未対応（検証対象外）
+// non_compliant: 🔴 不適合（基準未達）
+
 export interface StaffingCheckResult {
   serviceName: string;
-  passed: boolean;
+  overallLevel: ComplianceLevel;
   checks: {
     position: string;
     required: string;
     actual: { count: number; fte: number };
-    passed: boolean;
+    level: ComplianceLevel;
     message: string;
   }[];
   unsupportedPositions: string[];
@@ -196,39 +203,57 @@ export function checkStaffingStandard(
   standard.requirements.forEach(req => {
     const actual = staffByPosition[req.position] || { count: 0, fte: 0 };
     let requiredStr = '';
-    let passed = true;
+    let level: ComplianceLevel = 'compliant';
+    let neededValue = 0;
 
     if (req.type === 'fixed') {
-      requiredStr = `${req.fixedCount}人以上`;
-      passed = actual.count >= (req.fixedCount || 1);
+      neededValue = req.fixedCount || 1;
+      requiredStr = `${neededValue}人以上`;
+      if (actual.count < neededValue) {
+        level = 'non_compliant';
+      }
     } else if (req.type === 'ratio') {
-      const needed = Math.ceil(userCount / (req.ratio || 10));
-      requiredStr = `${needed}人以上（${userCount}人÷${req.ratio}:1）`;
-      passed = actual.fte >= needed;
+      neededValue = Math.ceil(userCount / (req.ratio || 10));
+      requiredStr = `${neededValue}人以上（${userCount}人÷${req.ratio}:1、常勤換算）`;
+      if (actual.fte < neededValue) {
+        level = 'non_compliant';
+      } else if (actual.fte < neededValue * 1.1) {
+        // 基準の110%未満 = ギリギリ → 要確認
+        level = 'review';
+      }
     } else if (req.type === 'fte_minimum') {
-      requiredStr = `FTE ${req.minFte}以上`;
-      passed = actual.fte >= (req.minFte || 0);
+      neededValue = req.minFte || 0;
+      requiredStr = `FTE ${neededValue}以上`;
+      if (actual.fte < neededValue) {
+        level = 'non_compliant';
+      } else if (actual.fte < neededValue * 1.1) {
+        level = 'review';
+      }
     }
 
-    if (req.fullTimeRequired && actual.count > 0) {
-      // 常勤要件は本来個人レベルで判定するが、ここでは職種レベルで簡易チェック
+    if (req.fullTimeRequired) {
       requiredStr += '（うち1名以上常勤）';
     }
+
+    const levelLabel = { compliant: '適合', review: '要確認', unsupported: '未対応', non_compliant: '不適合' };
 
     checks.push({
       position: req.position,
       required: requiredStr,
       actual,
-      passed,
-      message: passed
-        ? `${req.position}: 基準充足（${actual.fte} / ${requiredStr}）`
-        : `${req.position}: 基準未達（${actual.fte} / ${requiredStr}）`,
+      level,
+      message: `${req.position}: ${levelLabel[level]}（実績 ${actual.count}名/FTE ${actual.fte} / 基準 ${requiredStr}）`,
     });
   });
 
+  // 全体判定: 1つでも不適合があれば不適合、要確認があれば要確認
+  let overallLevel: ComplianceLevel = 'compliant';
+  if (checks.some(c => c.level === 'non_compliant')) overallLevel = 'non_compliant';
+  else if (checks.some(c => c.level === 'review')) overallLevel = 'review';
+
   return {
     serviceName: standard.serviceName,
-    passed: checks.every(c => c.passed),
+    overallLevel,
     checks,
     unsupportedPositions,
     warnings,

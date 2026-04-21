@@ -9,6 +9,8 @@ import { calculateOfficialFte, DEFAULT_FTE_CONFIG } from './domain/fteRules';
 import type { FacilityFteResult } from './domain/fteRules';
 import { ReviewTable } from './review/ReviewTable';
 import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
+import { getSupportedServices, getServiceStandard, checkStaffingStandard } from './domain/staffingStandards';
+import type { StaffingCheckResult } from './domain/staffingStandards';
 
 interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; }
 interface FacilityItem { id: string; name: string; facilityType?: string; inputMapping?: string; }
@@ -22,6 +24,8 @@ function App() {
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState<Record<string, { weeklyHours: number; fte: number }> | null>(null);
   const [exported, setExported] = useState(false);
+  const [selectedService, setSelectedService] = useState('');
+  const [userCount, setUserCount] = useState(10);
 
   // 自治体・施設
   const [municipalities, setMunicipalities] = useState<MunicipalityItem[]>([]);
@@ -83,6 +87,20 @@ function App() {
   const parsed = useMemo(() => (rows ? parseWorkbookToCommonModel(rows, inputMapping) : null), [rows, inputMapping]);
   const ruleResult: RuleResult | null = useMemo(() => (parsed ? applyRuleEngine(parsed) : null), [parsed]);
   const officialFte: FacilityFteResult | null = useMemo(() => (parsed ? calculateOfficialFte(parsed, DEFAULT_FTE_CONFIG) : null), [parsed]);
+
+  const complianceCheck: StaffingCheckResult | null = useMemo(() => {
+    if (!officialFte || !selectedService) return null;
+    const standard = getServiceStandard(selectedService);
+    if (!standard || !standard.supported) return null;
+    const staffByPosition: Record<string, { count: number; fte: number }> = {};
+    officialFte.staffDetails.forEach(d => {
+      const pos = d.position || '（未設定）';
+      if (!staffByPosition[pos]) staffByPosition[pos] = { count: 0, fte: 0 };
+      staffByPosition[pos].count++;
+      staffByPosition[pos].fte = Math.floor((staffByPosition[pos].fte + d.fte) * 100) / 100;
+    });
+    return checkStaffingStandard(standard, staffByPosition, userCount);
+  }, [officialFte, selectedService, userCount]);
   const staffList = useMemo<Staff[]>(() => parsed?.staff ?? [], [parsed]);
 
   const handleFile = async (file?: File) => {
@@ -324,6 +342,64 @@ function App() {
                   </ul>
                 </div>
               )}
+
+              {/* 配置基準チェック */}
+              <div className="rounded-lg border border-slate-200 p-4 mb-6">
+                <h3 className="text-sm font-bold text-slate-700 mb-3">人員配置基準チェック</h3>
+                <div className="flex gap-3 items-end mb-4">
+                  <div className="flex-1">
+                    <label className="text-xs text-slate-500">サービス種別</label>
+                    <select
+                      value={selectedService}
+                      onChange={e => setSelectedService(e.target.value)}
+                      className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm mt-1"
+                    >
+                      <option value="">-- 選択してください --</option>
+                      {getSupportedServices().map(s => (
+                        <option key={s.serviceCode} value={s.serviceCode}>{s.serviceName}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="w-28">
+                    <label className="text-xs text-slate-500">利用者数</label>
+                    <input
+                      type="number"
+                      value={userCount}
+                      onChange={e => setUserCount(Number(e.target.value) || 0)}
+                      className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm mt-1"
+                      min={1}
+                    />
+                  </div>
+                </div>
+
+                {complianceCheck && (
+                  <div className={`rounded-lg p-4 ${
+                    complianceCheck.overallLevel === 'compliant' ? 'bg-green-50 border border-green-200' :
+                    complianceCheck.overallLevel === 'review' ? 'bg-yellow-50 border border-yellow-200' :
+                    complianceCheck.overallLevel === 'non_compliant' ? 'bg-red-50 border border-red-200' :
+                    'bg-slate-50 border border-slate-200'
+                  }`}>
+                    <div className="text-sm font-bold mb-2">
+                      {complianceCheck.overallLevel === 'compliant' && '🟢 適合: 人員配置基準を充足しています'}
+                      {complianceCheck.overallLevel === 'review' && '🟡 要確認: 基準ギリギリの項目があります'}
+                      {complianceCheck.overallLevel === 'non_compliant' && '🔴 不適合: 基準未達の項目があります'}
+                    </div>
+                    <div className="space-y-1">
+                      {complianceCheck.checks.map((c, i) => (
+                        <div key={i} className="text-xs flex items-center gap-2">
+                          <span>{c.level === 'compliant' ? '🟢' : c.level === 'review' ? '🟡' : c.level === 'non_compliant' ? '🔴' : '⚪'}</span>
+                          <span className={c.level === 'non_compliant' ? 'text-red-700 font-medium' : 'text-slate-700'}>{c.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {complianceCheck.unsupportedPositions.length > 0 && (
+                      <div className="mt-2 text-xs text-slate-500">
+                        ⚪ 検証対象外の職種: {complianceCheck.unsupportedPositions.join(', ')}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
               {/* レビューテーブル */}
               <ReviewTable staffResults={ruleResult.staffResults} onConfirm={handleConfirm} />
