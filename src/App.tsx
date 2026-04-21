@@ -398,6 +398,10 @@ function App() {
                         ⚪ 検証対象外の職種: {complianceCheck.unsupportedPositions.join(', ')}
                       </div>
                     )}
+                    <div className="mt-3 pt-2 border-t border-slate-200 text-[10px] text-slate-400">
+                      <div>基準: 令和6年度報酬改定ベース</div>
+                      <div>注意: 自治体独自運用・加算要件・個別解釈がある場合は最終確認してください</div>
+                    </div>
                   </div>
                 )}
               </div>
