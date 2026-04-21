@@ -382,7 +382,7 @@ function App() {
                   }`}>
                     <div className="text-sm font-bold mb-2">
                       {complianceCheck.overallLevel === 'compliant' && '🟢 適合: 人員配置基準を充足しています'}
-                      {complianceCheck.overallLevel === 'review' && '🟡 要確認: 基準ギリギリの項目があります'}
+                      {complianceCheck.overallLevel === 'review' && '🟡 要確認: 基準は満たしていますが、余裕が小さいため確認を推奨します'}
                       {complianceCheck.overallLevel === 'non_compliant' && '🔴 不適合: 基準未達の項目があります'}
                     </div>
                     <div className="space-y-1">
