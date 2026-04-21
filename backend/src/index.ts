@@ -70,6 +70,80 @@ app.put('/api/municipalities/:id/mapping', async (req, res) => {
   res.json(item);
 });
 
+// テンプレ解析（セル位置自動検出）
+app.post('/api/municipalities/:id/detect-mapping', async (req, res) => {
+  const id = String(req.params.id);
+  const muni = await prisma.municipality.findUnique({ where: { id } });
+  if (!muni?.templateFile) return res.status(404).json({ error: 'テンプレートが未登録です' });
+  const filePath = path.join(TEMPLATE_DIR, muni.templateFile);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'ファイルが見つかりません' });
+
+  try {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const ws = workbook.worksheets[0];
+    if (!ws) return res.status(400).json({ error: 'シートが見つかりません' });
+
+    const PATTERNS: Record<string, RegExp> = {
+      name: /氏名|名前|従業者名|職員名/,
+      position: /職種|資格名|職名|役職/,
+      weeklyHours: /週.*時間|勤務時間|所定.*時間|労働時間/,
+      fte: /常勤換算|換算|FTE/i,
+      employmentType: /常勤.*非常勤|勤務形態|雇用形態|常勤区分/,
+      qualification: /資格|免許/,
+      dedicatedOrConcurrent: /専従.*兼務|専任.*兼任|専従|兼務/,
+    };
+
+    const detected: Record<string, { column: string; row: number; value: string }> = {};
+    let headerRow = 0;
+
+    for (let r = 1; r <= Math.min(20, ws.rowCount); r++) {
+      const row = ws.getRow(r);
+      let matchCount = 0;
+      row.eachCell({ includeEmpty: false }, (cell: any, col: number) => {
+        const val = String(cell.value ?? '').trim();
+        if (!val) return;
+        let letter = '';
+        let c = col;
+        while (c > 0) { const mod = (c - 1) % 26; letter = String.fromCharCode(65 + mod) + letter; c = Math.floor((c - 1) / 26); }
+        for (const [field, pat] of Object.entries(PATTERNS)) {
+          if (pat.test(val) && !detected[field]) {
+            detected[field] = { column: letter, row: r, value: val };
+            matchCount++;
+          }
+        }
+      });
+      if (matchCount >= 2 && !headerRow) headerRow = r;
+    }
+
+    const columns: Record<string, string> = {};
+    for (const [f, info] of Object.entries(detected)) columns[f] = info.column;
+
+    const required = ['name', 'position', 'fte'];
+    const confidence = required.filter(f => columns[f]).length / required.length;
+
+    const mapping = {
+      name: muni.name,
+      sheet: ws.name || 'Sheet1',
+      staffStartRow: headerRow ? headerRow + 1 : 3,
+      columns,
+    };
+
+    // 自動保存（confidence > 0.5の場合）
+    if (confidence > 0.5) {
+      await prisma.municipality.update({
+        where: { id },
+        data: { outputMapping: JSON.stringify(mapping) },
+      });
+    }
+
+    res.json({ mapping, confidence, detected, headerRow, autoSaved: confidence > 0.5 });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // テンプレダウンロード
 app.get('/api/municipalities/:id/template/download', async (req, res) => {
   const id = String(req.params.id);
