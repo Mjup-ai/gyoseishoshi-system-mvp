@@ -147,6 +147,103 @@ app.post('/api/municipalities/:id/detect-mapping', async (req, res) => {
   }
 });
 
+// テンプレ注入API（サーバー側でexceljsを使い、スタイル保持）
+app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async (req, res) => {
+  const id = String(req.params.id);
+  const muni = await prisma.municipality.findUnique({ where: { id } });
+  if (!muni?.templateFile) return res.status(404).json({ error: 'テンプレートが未登録です' });
+  const filePath = path.join(TEMPLATE_DIR, muni.templateFile);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'テンプレートファイルが見つかりません' });
+
+  try {
+    const ExcelJS = require('exceljs');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+
+    const { staff, schedule, confirmed, facilityName, year, month, sheetName } = req.body;
+
+    // シート選択
+    let ws = sheetName ? workbook.getWorksheet(sheetName) : null;
+    if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('汎用'));
+    if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('勤務形態'));
+    if (!ws) ws = workbook.worksheets[0];
+    if (!ws) return res.status(400).json({ error: 'シートが見つかりません' });
+
+    // 年月
+    const y = year || new Date().getFullYear();
+    const m = month || new Date().getMonth() + 1;
+    ws.getCell('M2').value = y;
+    ws.getCell('S2').value = m;
+    if (facilityName) ws.getCell('AI2').value = facilityName;
+
+    // スケジュールマップ
+    const SHIFT_HOURS: Record<string, number> = { '日勤': 8, '夜勤': 16, '早出': 7, '遅出': 9, '半日': 4, '休み': 0, '有給': 0, '公休': 0 };
+    const scheduleMap: Record<string, Record<string, any>> = {};
+    (schedule || []).forEach((e: any) => {
+      if (!scheduleMap[e.staffId]) scheduleMap[e.staffId] = {};
+      scheduleMap[e.staffId][e.date] = e;
+    });
+
+    // 全シートの共有数式をクリア（exceljsのShared Formula競合回避）
+    ws.eachRow({ includeEmpty: false }, (row: any) => {
+      row.eachCell({ includeEmpty: false }, (cell: any) => {
+        if (cell._value && cell._value.model && cell._value.model.sharedFormula) {
+          const result = cell._value.model.result;
+          delete cell._value.model.sharedFormula;
+          cell._value.model.type = 2;
+          cell.value = result || 0;
+        }
+      });
+    });
+
+    // データ注入（Row 11〜30, 1-indexed）
+    (staff || []).forEach((s: any, index: number) => {
+      if (index >= 20) return;
+      const row = 11 + index;
+
+      ws.getCell(`A${row}`).value = index + 1;
+      ws.getCell(`B${row}`).value = s.position || '';
+      const empType = s.employmentType?.includes('非常勤') ? 'C' : s.isDedicated === false ? 'B' : 'A';
+      ws.getCell(`C${row}`).value = empType;
+      ws.getCell(`D${row}`).value = s.qualification || '';
+      ws.getCell(`E${row}`).value = s.name;
+
+      // 日ごとの勤務時間
+      const staffSched = scheduleMap[s.id] || {};
+      let dayIndex = 0;
+      Object.values(staffSched).forEach((entry: any) => {
+        if (dayIndex >= 31) return;
+        const col = 6 + dayIndex; // F=6 (1-indexed)
+        const hours = entry.actualHours ?? SHIFT_HOURS[entry.shiftType] ?? 0;
+        if (hours > 0) {
+          ws.getCell(row, col).value = hours;
+        }
+        dayIndex++;
+      });
+
+      // 合計・週平均（共有数式をクリアしてから値を入れる）
+      const conf = confirmed?.[s.id];
+      if (conf) {
+        const akCell = ws.getCell(`AK${row}`);
+        akCell.value = conf.weeklyHours * 4;
+        delete (akCell as any).sharedFormula;
+        const alCell = ws.getCell(`AL${row}`);
+        alCell.value = conf.weeklyHours;
+        delete (alCell as any).sharedFormula;
+      }
+    });
+
+    // バッファとして返す
+    const buffer = await workbook.xlsx.writeBuffer();
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(muni.name + '_勤務体制一覧.xlsx')}`);
+    res.send(Buffer.from(buffer));
+  } catch (e) {
+    console.error('Export error:', e);
+    res.status(500).json({ error: String(e) });
+  }
+});
+
 // テンプレダウンロード
 app.get('/api/municipalities/:id/template/download', async (req, res) => {
   const id = String(req.params.id);

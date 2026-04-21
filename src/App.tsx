@@ -7,7 +7,6 @@ import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel'
 import { applyRuleEngine } from './rules/applyRuleEngine';
 import { ReviewTable } from './review/ReviewTable';
 import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
-import { exportToMhlwTemplate } from './exporter/exportToMhlwTemplate';
 
 interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; }
 interface FacilityItem { id: string; name: string; facilityType?: string; inputMapping?: string; }
@@ -108,20 +107,21 @@ function App() {
     let buf: ArrayBuffer;
     const muniName = selectedMuni?.name || '出力';
 
-    // テンプレがある自治体ならテンプレ注入
+    // テンプレがある自治体ならサーバー側でテンプレ注入（スタイル保持）
     if (selectedMuniId && selectedMuni?.templateFile) {
       try {
-        const res = await apiFetch(`/api/municipalities/${selectedMuniId}/template/download`);
-        if (res.ok) {
-          const templateBuffer = await res.arrayBuffer();
-          // 厚労省テンプレ（勤務形態一覧表シートがある場合）は専用ロジック
-          buf = await exportToMhlwTemplate({
-            templateBuffer,
+        const res = await apiFetch(`/api/municipalities/${selectedMuniId}/export`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
             staff: staffList,
             schedule: parsed.schedule,
             confirmed,
             facilityName: selectedFacility?.name,
-          });
+          }),
+        });
+        if (res.ok) {
+          buf = await res.arrayBuffer();
         } else {
           buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
         }
