@@ -1,21 +1,20 @@
-import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 
 /** ブラウザでExcelファイルを読み込み、rows配列に変換 */
 export async function readWorkbookFile(file: File, sheetName?: string): Promise<string[][]> {
-  const workbook = new ExcelJS.Workbook();
   const buffer = await file.arrayBuffer();
-  await workbook.xlsx.load(buffer);
+  const workbook = XLSX.read(buffer, { type: 'array' });
 
-  const worksheet = sheetName
-    ? workbook.getWorksheet(sheetName) ?? workbook.worksheets[0]
-    : workbook.worksheets[0];
+  const name = sheetName && workbook.SheetNames.includes(sheetName)
+    ? sheetName
+    : workbook.SheetNames[0];
 
-  if (!worksheet) throw new Error('ワークシートが見つかりません');
+  if (!name) {
+    throw new Error(`ワークシートが見つかりません（シート数: ${workbook.SheetNames.length}）`);
+  }
 
-  return worksheet.getSheetValues().slice(1).map((row) => {
-    if (Array.isArray(row)) {
-      return row.slice(1).map((cell) => (cell == null ? '' : String(cell)));
-    }
-    return [];
-  });
+  const sheet = workbook.Sheets[name];
+  const rows: string[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+  return rows;
 }
