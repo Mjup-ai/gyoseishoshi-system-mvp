@@ -1,122 +1,56 @@
 import type { CommonModel, InputMapping, ScheduleEntry, Staff } from '../domain/types';
 
-const columnLettersToIndex = (column: string): number => {
-  return column
-    .trim()
-    .toUpperCase()
-    .split('')
-    .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
-};
-
-const setDeepValue = (target: Record<string, unknown>, path: string, value: string): void => {
-  const keys = path.split('.').filter(Boolean);
-  if (keys.length === 0) {
-    return;
-  }
-
-  let current: Record<string, unknown> = target;
-
-  for (let i = 0; i < keys.length - 1; i += 1) {
-    const key = keys[i];
-    const next = current[key];
-
-    if (!next || typeof next !== 'object') {
-      current[key] = {};
-    }
-
-    current = current[key] as Record<string, unknown>;
-  }
-
-  current[keys[keys.length - 1]] = value;
-};
-
-interface ParsedRow {
-  staffData: Record<string, unknown>;
-  scheduleSymbols: Array<{ date: string; symbol: string; column: string }>;
+function columnLetterToIndex(letter: string): number {
+  return letter.toUpperCase().charCodeAt(0) - 65;
 }
 
-const parseRow = (row: string[], inputMapping: InputMapping): ParsedRow => {
-  const staffData: Record<string, unknown> = {};
-  const scheduleSymbols: Array<{ date: string; symbol: string; column: string }> = [];
-
-  Object.entries(inputMapping.columnMapping).forEach(([column, fieldPath]) => {
-    const value = (row[columnLettersToIndex(column)] ?? '').trim();
-    if (!value) {
-      return;
-    }
-
-    if (fieldPath.startsWith('schedule.')) {
-      const date = fieldPath.slice('schedule.'.length);
-      if (date) {
-        scheduleSymbols.push({ date, symbol: value, column });
-      }
-      return;
-    }
-
-    setDeepValue(staffData, fieldPath, value);
-  });
-
-  return { staffData, scheduleSymbols };
-};
-
-export const parseWorkbookToCommonModel = (
-  rows: string[][],
-  inputMapping: InputMapping,
-): CommonModel => {
+/** InputMappingに基づきExcelのrows配列をCommonModelに変換 */
+export function parseWorkbookToCommonModel(rows: string[][], mapping: InputMapping): CommonModel {
   const staff: Staff[] = [];
   const schedule: ScheduleEntry[] = [];
   const warnings: string[] = [];
 
-  for (let i = inputMapping.headerRow; i < rows.length; i += 1) {
-    const row = rows[i] ?? [];
-    const parsedRow = parseRow(row, inputMapping);
-    const hasStaffData = Object.keys(parsedRow.staffData).length > 0;
-    const hasScheduleData = parsedRow.scheduleSymbols.length > 0;
+  const dataRows = rows.slice(mapping.headerRow);
 
-    if (!hasStaffData && !hasScheduleData) {
-      continue;
-    }
+  dataRows.forEach((row, rowIndex) => {
+    // 名前列を動的に取得
+    const nameCol = Object.entries(mapping.columnMapping).find(([, v]) => v === 'name')?.[0];
+    const posCol = Object.entries(mapping.columnMapping).find(([, v]) => v === 'position')?.[0];
 
-    const rowNumber = i + 1;
-    const name = String(parsedRow.staffData.name ?? '').trim();
+    const nameIndex = nameCol ? columnLetterToIndex(nameCol) : 0;
+    const posIndex = posCol ? columnLetterToIndex(posCol) : 1;
+    const name = row[nameIndex]?.trim();
 
     if (!name) {
-      warnings.push(`行${rowNumber}: 氏名(name)が空のためスキップしました`);
-      continue;
+      if (row.some((c) => c.trim())) {
+        warnings.push(`行${rowIndex + mapping.headerRow + 1}: 氏名が空です`);
+      }
+      return;
     }
 
-    const staffId = `staff-${rowNumber}`;
-    const staffEntry: Staff = {
+    const staffId = `staff-${rowIndex + 1}`;
+    staff.push({
       id: staffId,
       name,
-      position:
-        typeof parsedRow.staffData.position === 'string'
-          ? (parsedRow.staffData.position as string)
-          : undefined,
-    };
+      position: row[posIndex]?.trim() || undefined,
+    });
 
-    staff.push(staffEntry);
+    // スケジュール列を処理
+    Object.entries(mapping.columnMapping).forEach(([column, target]) => {
+      if (!target.startsWith('schedule.')) return;
+      const raw = row[columnLetterToIndex(column)]?.trim();
+      if (!raw) return;
 
-    parsedRow.scheduleSymbols.forEach(({ date, symbol, column }) => {
-      const normalizedShift = inputMapping.shiftSymbols[symbol];
-      if (!normalizedShift) {
-        warnings.push(
-          `行${rowNumber} 列${column}: 未定義の勤務記号 '${symbol}' を検出しました`,
-        );
-        return;
+      const date = target.replace('schedule.', '');
+      const shiftType = mapping.shiftSymbols[raw] ?? raw;
+
+      if (!(raw in mapping.shiftSymbols)) {
+        warnings.push(`${name}: ${date} の勤務記号「${raw}」が未定義です`);
       }
 
-      schedule.push({
-        staffId,
-        date,
-        shiftType: normalizedShift,
-      });
+      schedule.push({ staffId, date, shiftType });
     });
-  }
+  });
 
-  return {
-    staff,
-    schedule,
-    warnings,
-  };
-};
+  return { staff, schedule, warnings };
+}

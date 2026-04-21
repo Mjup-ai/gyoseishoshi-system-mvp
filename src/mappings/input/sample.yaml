@@ -1,5 +1,5 @@
-name: sample-input-mapping
-format: xlsx
+name: サンプルグループホーム
+format: excel
 sheet: シフト表
 headerRow: 2
 columnMapping:
@@ -13,9 +13,11 @@ columnMapping:
   H: schedule.2026-04-06
   I: schedule.2026-04-07
 shiftSymbols:
-  ○: 日勤
-  ×: 休み
-  △: 早出
-  ▽: 遅出
-  夜: 夜勤
-  有: 有給
+  "○": 日勤
+  "×": 休み
+  "△": 早出
+  "▽": 遅出
+  "夜": 夜勤
+  "有": 有給
+  "半": 半日
+  "公": 公休

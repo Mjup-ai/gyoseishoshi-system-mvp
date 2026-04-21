@@ -1,0 +1,8 @@
+name: サンプル自治体様式
+sheet: 勤務体制一覧表
+staffStartRow: 3
+columns:
+  name: A
+  position: B
+  weeklyHours: C
+  fte: D

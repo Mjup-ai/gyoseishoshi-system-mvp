@@ -1,104 +1,201 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { CommonModel, InputMapping } from './domain/types';
-import { loadInputMapping } from './lib/loadInputMapping';
-import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel';
+import { useMemo, useState } from 'react';
+import type { Staff, RuleResult } from './domain/types';
+import { loadSampleInputMapping, loadSampleOutputMapping } from './lib/loadMapping';
 import { readWorkbookFile } from './parser/readWorkbookFile';
+import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel';
+import { applyRuleEngine } from './rules/applyRuleEngine';
+import { ReviewTable } from './review/ReviewTable';
+import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
 
-const inputMappingUrl = new URL('./mappings/input/sample.yaml', import.meta.url).toString();
+const inputMapping = loadSampleInputMapping();
+const outputMapping = loadSampleOutputMapping();
+
+type Step = 1 | 2 | 3;
 
 function App() {
-  const [inputFile, setInputFile] = useState<File | null>(null);
-  const [mapping, setMapping] = useState<InputMapping | null>(null);
-  const [sheetName, setSheetName] = useState('');
-  const [result, setResult] = useState<CommonModel | null>(null);
-  const [errorMessage, setErrorMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [step, setStep] = useState<Step>(1);
+  const [rows, setRows] = useState<string[][] | null>(null);
+  const [fileName, setFileName] = useState('');
+  const [error, setError] = useState('');
+  const [confirmed, setConfirmed] = useState<Record<string, { weeklyHours: number; fte: number }> | null>(null);
+  const [exported, setExported] = useState(false);
 
-  useEffect(() => {
-    const initMapping = async () => {
-      try {
-        const loaded = await loadInputMapping(inputMappingUrl);
-        setMapping(loaded);
-        setSheetName(loaded.sheet);
-      } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : 'InputMappingの読み込みに失敗しました');
-      }
-    };
+  const parsed = useMemo(() => (rows ? parseWorkbookToCommonModel(rows, inputMapping) : null), [rows]);
+  const ruleResult: RuleResult | null = useMemo(() => (parsed ? applyRuleEngine(parsed) : null), [parsed]);
+  const staffList = useMemo<Staff[]>(() => parsed?.staff ?? [], [parsed]);
 
-    void initMapping();
-  }, []);
-
-  const handleParse = async () => {
-    if (!inputFile || !mapping) {
-      return;
-    }
-
-    setIsLoading(true);
-    setErrorMessage('');
-
+  const handleFile = async (file?: File) => {
+    if (!file) return;
+    setError('');
     try {
-      const rows = await readWorkbookFile(inputFile, sheetName || mapping.sheet);
-      const parsed = parseWorkbookToCommonModel(rows, mapping);
-      setResult(parsed);
-    } catch (error) {
-      setResult(null);
-      setErrorMessage(error instanceof Error ? error.message : 'Excelファイルの読込に失敗しました');
-    } finally {
-      setIsLoading(false);
+      const r = await readWorkbookFile(file, inputMapping.sheet);
+      setRows(r);
+      setFileName(file.name);
+      setConfirmed(null);
+      setExported(false);
+      setStep(2);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '読込エラー');
     }
   };
 
-  const isParseDisabled = useMemo(() => {
-    return !inputFile || !mapping || isLoading;
-  }, [inputFile, mapping, isLoading]);
+  const handleConfirm = (data: Record<string, { weeklyHours: number; fte: number }>) => {
+    setConfirmed(data);
+    setStep(3);
+  };
+
+  const handleExport = async () => {
+    if (!confirmed) return;
+    const buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
+    downloadWorkbook(buf, `勤務体制一覧_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    setExported(true);
+  };
+
+  const handleReset = () => {
+    setRows(null);
+    setFileName('');
+    setConfirmed(null);
+    setExported(false);
+    setError('');
+    setStep(1);
+  };
 
   return (
-    <main>
-      <h1>勤務体制変換ツール</h1>
-      <ol>
-        <li>
-          <h2>Step 1</h2>
-          <p>入力ファイルとマッピングを選択</p>
+    <div className="min-h-screen bg-slate-50">
+      {/* ヘッダー */}
+      <header className="bg-white border-b border-slate-200 px-6 py-4">
+        <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div>
-            <label htmlFor="xlsx-file">Excel(.xlsx)ファイル</label>
-            <input
-              id="xlsx-file"
-              type="file"
-              accept=".xlsx"
-              onChange={(event) => setInputFile(event.target.files?.[0] ?? null)}
-            />
+            <h1 className="text-xl font-bold text-slate-800">勤務体制変換ツール</h1>
+            <p className="text-xs text-slate-500 mt-0.5">福祉事業所向け — MVP</p>
           </div>
-          <div>
-            <label htmlFor="sheet-name">シート名</label>
-            <input
-              id="sheet-name"
-              value={sheetName}
-              onChange={(event) => setSheetName(event.target.value)}
-              placeholder="例: シフト表"
-            />
-          </div>
-          <button type="button" onClick={() => void handleParse()} disabled={isParseDisabled}>
-            {isLoading ? '読込中...' : '読込して変換'}
-          </button>
-          {errorMessage ? <p>{errorMessage}</p> : null}
-          {result ? (
-            <div>
-              <p>スタッフ件数: {result.staff.length}</p>
-              <p>シフト件数: {result.schedule.length}</p>
-              <p>警告件数: {result.warnings.length}</p>
+          {rows && (
+            <button onClick={handleReset} className="text-sm text-slate-500 hover:text-slate-700 underline">
+              最初からやり直す
+            </button>
+          )}
+        </div>
+      </header>
+
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        {/* ステップインジケーター */}
+        <div className="flex items-center gap-2 mb-8">
+          {[
+            { n: 1, label: 'アップロード' },
+            { n: 2, label: '確認・修正' },
+            { n: 3, label: 'Excel出力' },
+          ].map((s, i) => (
+            <div key={s.n} className="flex items-center gap-2">
+              {i > 0 && <div className={`w-8 h-0.5 ${step >= s.n ? 'bg-blue-500' : 'bg-slate-200'}`} />}
+              <div className="flex items-center gap-2">
+                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                  step > s.n ? 'bg-blue-500 text-white' :
+                  step === s.n ? 'bg-blue-600 text-white' :
+                  'bg-slate-200 text-slate-500'
+                }`}>{step > s.n ? '✓' : s.n}</div>
+                <span className={`text-sm font-medium ${step >= s.n ? 'text-slate-800' : 'text-slate-400'}`}>{s.label}</span>
+              </div>
             </div>
-          ) : null}
-        </li>
-        <li>
-          <h2>Step 2</h2>
-          <p>ルール評価と警告を確認</p>
-        </li>
-        <li>
-          <h2>Step 3</h2>
-          <p>変換結果を出力</p>
-        </li>
-      </ol>
-    </main>
+          ))}
+        </div>
+
+        {/* Step 1: アップロード */}
+        {step === 1 && (
+          <div className="bg-white rounded-xl border border-slate-200 p-8 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-800 mb-2">シフト表をアップロード</h2>
+            <p className="text-sm text-slate-500 mb-6">事業所のExcelシフト表（.xlsx）をアップロードしてください。</p>
+            <label className="flex flex-col items-center gap-3 rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 p-12 cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition">
+              <svg className="w-10 h-10 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 16V4m0 0L8 8m4-4l4 4M4 20h16" />
+              </svg>
+              <span className="text-sm font-medium text-slate-600">クリックしてExcelを選択</span>
+              <span className="text-xs text-slate-400">.xlsx形式のみ対応</span>
+              <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+            </label>
+            {error && <p className="mt-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">{error}</p>}
+          </div>
+        )}
+
+        {/* Step 2: 確認・修正 */}
+        {step === 2 && ruleResult && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-bold text-slate-800">解析結果</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">{fileName} — {ruleResult.staffResults.length}名検出</p>
+                </div>
+                <button onClick={() => setStep(1)} className="text-sm text-blue-600 hover:underline">← ファイル変更</button>
+              </div>
+
+              {/* サマリー */}
+              <div className="grid grid-cols-4 gap-3 mb-6">
+                <div className="rounded-lg bg-slate-50 p-3 text-center">
+                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.fullTimeEquivalent}</div>
+                  <div className="text-xs text-slate-500">常勤換算合計</div>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3 text-center">
+                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.totalDayHours}h</div>
+                  <div className="text-xs text-slate-500">日勤時間</div>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3 text-center">
+                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.totalNightHours}h</div>
+                  <div className="text-xs text-slate-500">夜勤時間</div>
+                </div>
+                <div className="rounded-lg bg-slate-50 p-3 text-center">
+                  <div className="text-xl font-bold text-slate-800">{ruleResult.facilityTotals.totalHolidayCount}</div>
+                  <div className="text-xs text-slate-500">休日数</div>
+                </div>
+              </div>
+
+              {/* 警告 */}
+              {ruleResult.warnings.length > 0 && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-6">
+                  <div className="text-sm font-semibold text-amber-800 mb-1">⚠ 警告</div>
+                  <ul className="text-sm text-amber-700 space-y-1">
+                    {ruleResult.warnings.map((w, i) => <li key={i}>・{w}</li>)}
+                  </ul>
+                </div>
+              )}
+
+              {/* レビューテーブル */}
+              <ReviewTable staffResults={ruleResult.staffResults} onConfirm={handleConfirm} />
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Excel出力 */}
+        {step === 3 && confirmed && (
+          <div className="bg-white rounded-xl border border-slate-200 p-8 shadow-sm text-center">
+            <h2 className="text-lg font-bold text-slate-800 mb-2">Excel出力</h2>
+            <p className="text-sm text-slate-500 mb-6">確定データをExcelファイルとしてダウンロードします。</p>
+
+            <div className="inline-flex flex-col items-center gap-4">
+              <button
+                onClick={handleExport}
+                disabled={exported}
+                className="rounded-lg bg-blue-600 px-8 py-3 text-base font-bold text-white shadow hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-default"
+              >
+                {exported ? '✓ ダウンロード完了' : 'Excelをダウンロード'}
+              </button>
+
+              {exported && (
+                <p className="text-sm text-emerald-600 font-medium">ファイルがダウンロードされました。</p>
+              )}
+
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => setStep(2)} className="text-sm text-blue-600 hover:underline">← 確認に戻る</button>
+                <button onClick={handleReset} className="text-sm text-slate-500 hover:underline">最初からやり直す</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      <footer className="text-center py-4 text-xs text-slate-400">
+        Mjup株式会社 — 行政書士システム MVP — 機密
+      </footer>
+    </div>
   );
 }
 
