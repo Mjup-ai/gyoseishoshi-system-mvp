@@ -1,14 +1,15 @@
-import { useMemo, useState } from 'react';
-import type { Staff, RuleResult } from './domain/types';
+import { useEffect, useMemo, useState } from 'react';
+import type { Staff, RuleResult, InputMapping, OutputMapping } from './domain/types';
 import { loadSampleInputMapping, loadSampleOutputMapping } from './lib/loadMapping';
+import { apiFetch } from './lib/api';
 import { readWorkbookFile } from './parser/readWorkbookFile';
 import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel';
 import { applyRuleEngine } from './rules/applyRuleEngine';
 import { ReviewTable } from './review/ReviewTable';
 import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
 
-const inputMapping = loadSampleInputMapping();
-const outputMapping = loadSampleOutputMapping();
+interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; }
+interface FacilityItem { id: string; name: string; facilityType?: string; inputMapping?: string; }
 
 type Step = 1 | 2 | 3;
 
@@ -20,7 +21,64 @@ function App() {
   const [confirmed, setConfirmed] = useState<Record<string, { weeklyHours: number; fte: number }> | null>(null);
   const [exported, setExported] = useState(false);
 
-  const parsed = useMemo(() => (rows ? parseWorkbookToCommonModel(rows, inputMapping) : null), [rows]);
+  // 自治体・施設
+  const [municipalities, setMunicipalities] = useState<MunicipalityItem[]>([]);
+  const [facilities, setFacilities] = useState<FacilityItem[]>([]);
+  const [selectedMuniId, setSelectedMuniId] = useState('');
+  const [selectedFacilityId, setSelectedFacilityId] = useState('');
+  const [newMuniName, setNewMuniName] = useState('');
+  const [newMuniPref, setNewMuniPref] = useState('');
+  const [newFacName, setNewFacName] = useState('');
+  const [newFacType, setNewFacType] = useState('');
+
+  useEffect(() => {
+    apiFetch('/api/municipalities').then(r => r.json()).then(d => setMunicipalities(d.items ?? [])).catch(() => {});
+    apiFetch('/api/facilities').then(r => r.json()).then(d => setFacilities(d.items ?? [])).catch(() => {});
+  }, []);
+
+  const addMunicipality = async () => {
+    if (!newMuniName.trim()) return;
+    const r = await apiFetch('/api/municipalities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newMuniName.trim(), prefecture: newMuniPref.trim() || null }),
+    });
+    const item = await r.json();
+    setMunicipalities(prev => [...prev, item]);
+    setSelectedMuniId(item.id);
+    setNewMuniName(''); setNewMuniPref('');
+  };
+
+  const addFacility = async () => {
+    if (!newFacName.trim()) return;
+    const r = await apiFetch('/api/facilities', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newFacName.trim(), facilityType: newFacType.trim() || null }),
+    });
+    const item = await r.json();
+    setFacilities(prev => [...prev, item]);
+    setSelectedFacilityId(item.id);
+    setNewFacName(''); setNewFacType('');
+  };
+
+  const selectedMuni = municipalities.find(m => m.id === selectedMuniId);
+  const selectedFacility = facilities.find(f => f.id === selectedFacilityId);
+
+  // マッピング: DB登録があればそれを使う、なければサンプル
+  const inputMapping: InputMapping = useMemo(() => {
+    if (selectedFacility?.inputMapping) {
+      try { return JSON.parse(selectedFacility.inputMapping); } catch { /* fall through */ }
+    }
+    return loadSampleInputMapping();
+  }, [selectedFacility]);
+
+  const outputMapping: OutputMapping = useMemo(() => {
+    if (selectedMuni?.outputMapping) {
+      try { return JSON.parse(selectedMuni.outputMapping); } catch { /* fall through */ }
+    }
+    return loadSampleOutputMapping();
+  }, [selectedMuni]);
+
+  const parsed = useMemo(() => (rows ? parseWorkbookToCommonModel(rows, inputMapping) : null), [rows, inputMapping]);
   const ruleResult: RuleResult | null = useMemo(() => (parsed ? applyRuleEngine(parsed) : null), [parsed]);
   const staffList = useMemo<Staff[]>(() => parsed?.staff ?? [], [parsed]);
 
@@ -99,8 +157,64 @@ function App() {
           ))}
         </div>
 
-        {/* Step 1: アップロード */}
+        {/* Step 1: 選択 + アップロード */}
         {step === 1 && (
+          <div className="space-y-6">
+            {/* 自治体選択 */}
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-800 mb-4">自治体を選択</h2>
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <select
+                    value={selectedMuniId}
+                    onChange={(e) => setSelectedMuniId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">-- 自治体を選択 --</option>
+                    {municipalities.map(m => (
+                      <option key={m.id} value={m.id}>{m.prefecture ? `${m.prefecture} ${m.name}` : m.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <details className="mt-3">
+                <summary className="text-xs text-blue-600 cursor-pointer">新しい自治体を追加</summary>
+                <div className="mt-2 flex gap-2">
+                  <input placeholder="都道府県" value={newMuniPref} onChange={e => setNewMuniPref(e.target.value)} className="rounded border border-slate-300 px-2 py-1 text-sm w-24" />
+                  <input placeholder="自治体名" value={newMuniName} onChange={e => setNewMuniName(e.target.value)} className="rounded border border-slate-300 px-2 py-1 text-sm flex-1" />
+                  <button onClick={addMunicipality} className="rounded bg-blue-600 px-3 py-1 text-sm text-white font-medium">追加</button>
+                </div>
+              </details>
+            </div>
+
+            {/* 施設選択 */}
+            <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm">
+              <h2 className="text-lg font-bold text-slate-800 mb-4">施設を選択</h2>
+              <div className="flex gap-3 items-end">
+                <div className="flex-1">
+                  <select
+                    value={selectedFacilityId}
+                    onChange={(e) => setSelectedFacilityId(e.target.value)}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">-- 施設を選択 --</option>
+                    {facilities.map(f => (
+                      <option key={f.id} value={f.id}>{f.name}{f.facilityType ? ` (${f.facilityType})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <details className="mt-3">
+                <summary className="text-xs text-blue-600 cursor-pointer">新しい施設を追加</summary>
+                <div className="mt-2 flex gap-2">
+                  <input placeholder="施設名" value={newFacName} onChange={e => setNewFacName(e.target.value)} className="rounded border border-slate-300 px-2 py-1 text-sm flex-1" />
+                  <input placeholder="事業種別" value={newFacType} onChange={e => setNewFacType(e.target.value)} className="rounded border border-slate-300 px-2 py-1 text-sm w-32" />
+                  <button onClick={addFacility} className="rounded bg-blue-600 px-3 py-1 text-sm text-white font-medium">追加</button>
+                </div>
+              </details>
+            </div>
+
+            {/* ファイルアップロード */}
           <div className="bg-white rounded-xl border border-slate-200 p-8 shadow-sm">
             <h2 className="text-lg font-bold text-slate-800 mb-2">シフト表をアップロード</h2>
             <p className="text-sm text-slate-500 mb-6">事業所のExcelシフト表（.xlsx）をアップロードしてください。</p>
@@ -113,6 +227,7 @@ function App() {
               <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
             </label>
             {error && <p className="mt-4 text-sm text-red-600 bg-red-50 rounded-lg p-3">{error}</p>}
+          </div>
           </div>
         )}
 
