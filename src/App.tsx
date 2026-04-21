@@ -6,7 +6,7 @@ import { readWorkbookFile } from './parser/readWorkbookFile';
 import { parseWorkbookToCommonModel } from './parser/parseWorkbookToCommonModel';
 import { applyRuleEngine } from './rules/applyRuleEngine';
 import { ReviewTable } from './review/ReviewTable';
-import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook';
+import { exportToWorkbook, exportWithTemplate, downloadWorkbook } from './exporter/exportToWorkbook';
 
 interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; }
 interface FacilityItem { id: string; name: string; facilityType?: string; inputMapping?: string; }
@@ -104,8 +104,27 @@ function App() {
 
   const handleExport = async () => {
     if (!confirmed) return;
-    const buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
-    downloadWorkbook(buf, `勤務体制一覧_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    let buf: ArrayBuffer;
+    const muniName = selectedMuni?.name || '出力';
+
+    // テンプレがある自治体ならテンプレ注入
+    if (selectedMuniId && selectedMuni?.templateFile) {
+      try {
+        const res = await apiFetch(`/api/municipalities/${selectedMuniId}/template/download`);
+        if (res.ok) {
+          const templateBuffer = await res.arrayBuffer();
+          buf = await exportWithTemplate({ templateBuffer, mapping: outputMapping, staff: staffList, confirmed });
+        } else {
+          buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
+        }
+      } catch {
+        buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
+      }
+    } else {
+      buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
+    }
+
+    downloadWorkbook(buf, `勤務体制一覧_${muniName}_${new Date().toISOString().slice(0, 10)}.xlsx`);
     setExported(true);
   };
 
