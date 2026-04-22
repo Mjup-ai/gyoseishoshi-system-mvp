@@ -202,12 +202,23 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
     if (!ws) ws = workbook.worksheets[0];
     if (!ws) return res.status(400).json({ error: 'シートが見つかりません' });
 
+    const { standardWeeklyHours } = req.body;
+
     // 年月
     const y = year || new Date().getFullYear();
     const m = month || new Date().getMonth() + 1;
     ws.getCell('M2').value = y;
     ws.getCell('S2').value = m;
     if (facilityName) ws.getCell('AI2').value = facilityName;
+
+    // 常勤の勤務すべき時間数（ヘッダー部: Row 5 付近）
+    if (standardWeeklyHours) {
+      // AI5セル付近（シートにより位置が異なるが、共通でRow5のAI列付近）
+      try {
+        ws.getCell('AI5').value = standardWeeklyHours;
+        ws.getCell('AM5').value = standardWeeklyHours * 4; // 月間
+      } catch { /* セルが存在しない場合は無視 */ }
+    }
 
     // スケジュールマップ
     const SHIFT_HOURS: Record<string, number> = { '日勤': 8, '夜勤': 16, '早出': 7, '遅出': 9, '半日': 4, '休み': 0, '有給': 0, '公休': 0 };
@@ -231,8 +242,8 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
 
     // データ注入（dataStart〜dataStart+19, 1-indexed）
     const usedSheetName = ws.name;
-    const filledItems = ['No.', '氏名', '職種', '勤務形態', '日別勤務時間', '勤務時間合計', '週平均勤務時間', '年月', '事業所名'];
-    const manualItems = ['資格', '兼務状況', '記載期間', '予定/実績の別', '常勤の勤務すべき時間数'];
+    const filledItems = ['No.', '氏名', '職種', '勤務形態', '日別勤務時間', '勤務時間合計', '週平均勤務時間', '年月', '事業所名', '常勤の勤務すべき時間数'];
+    const manualItems = ['資格', '兼務状況', '記載期間', '予定/実績の別'];
 
     (staff || []).forEach((s: any, index: number) => {
       if (index >= 20) return;

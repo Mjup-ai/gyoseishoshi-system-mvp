@@ -141,6 +141,7 @@ function App() {
             confirmed,
             facilityName: selectedFacility?.name,
             serviceCode: selectedService || undefined,
+            standardWeeklyHours: 40,
           }),
         });
         if (res.ok) {
