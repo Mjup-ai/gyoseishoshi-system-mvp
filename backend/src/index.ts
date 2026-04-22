@@ -174,15 +174,20 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
       'FUNCTIONAL': { sheet: '勤務形態一覧表（機能訓練）', dataStart: 11 },
       'LIFE_TRAINING': { sheet: '勤務形態一覧表（生活訓練）', dataStart: 11 },
       'TRANSITION': { sheet: '勤務形態一覧表（就労移行支援）', dataStart: 11 },
+      'A_CONTINUOUS': { sheet: '勤務形態一覧表（就労継続支援A型・B型）', dataStart: 11 },
+      'B_CONTINUOUS': { sheet: '勤務形態一覧表（就労継続支援A型・B型）', dataStart: 11 },
       'A_B_CONTINUOUS': { sheet: '勤務形態一覧表（就労継続支援A型・B型）', dataStart: 11 },
       'RETENTION': { sheet: '勤務形態一覧表（就労定着支援）', dataStart: 11 },
       'INDEPENDENT': { sheet: '勤務形態一覧表（自立生活援助）', dataStart: 11 },
+      'GROUP_HOME': { sheet: '勤務形態一覧表（共同生活援助・介護サービス包括型）', dataStart: 11 },
       'GH_INCLUSIVE': { sheet: '勤務形態一覧表（共同生活援助・介護サービス包括型）', dataStart: 11 },
       'GH_EXTERNAL': { sheet: '勤務形態一覧表（共同生活援助・外部サービス利用型）', dataStart: 11 },
       'GH_DAYTIME': { sheet: '勤務形態一覧表（共同生活援助・日中サービス支援型', dataStart: 11 },
       'FACILITY': { sheet: '勤務形態一覧表（障害者支援施設）', dataStart: 11 },
       'GENERAL_CONSULT': { sheet: '勤務形態一覧表（一般相談支援）', dataStart: 11 },
       'SPECIFIC_CONSULT': { sheet: '勤務形態一覧（特定相談支援・障害児相談支援）', dataStart: 11 },
+      'AFTER_SCHOOL': { sheet: '勤務形態一覧表（児童発達支援・放課後デイサービス）', dataStart: 12 },
+      'CHILD_DEV': { sheet: '勤務形態一覧表（児童発達支援・放課後デイサービス）', dataStart: 12 },
       'CHILD_AFTER_SCHOOL': { sheet: '勤務形態一覧表（児童発達支援・放課後デイサービス）', dataStart: 12 },
       'CHILD_SEVERE': { sheet: '勤務形態一覧表（児童発達支援・主として重症心身障害児）', dataStart: 12 },
       'CHILD_CENTER': { sheet: '勤務形態一覧表（児童発達支援センター）', dataStart: 12 },
@@ -228,17 +233,48 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
       scheduleMap[e.staffId][e.date] = e;
     });
 
-    // 全シートの共有数式をクリア（exceljsのShared Formula競合回避）
-    ws.eachRow({ includeEmpty: false }, (row: any) => {
-      row.eachCell({ includeEmpty: false }, (cell: any) => {
-        if (cell._value && cell._value.model && cell._value.model.sharedFormula) {
-          const result = cell._value.model.result;
-          delete cell._value.model.sharedFormula;
-          cell._value.model.type = 2;
-          cell.value = result || 0;
+    // 使用しないシートのサンプルデータをクリア
+    workbook.worksheets.forEach((sheet: any) => {
+      if (sheet === ws) return; // 使用シートはスキップ
+      if (sheet.name === '選択肢' || sheet.name === '付表３－２') return;
+      // データ行(Row 10〜30)のサンプルデータをクリア
+      for (let r = 10; r <= 31; r++) {
+        const row = sheet.getRow(r);
+        if (row) {
+          [1, 2, 3, 4, 5, 37, 38, 39].forEach((c: number) => {
+            const cell = row.getCell(c);
+            if (cell && cell.value != null) {
+              cell.value = null;
+            }
+          });
         }
+      }
+    });
+
+    // 全シートの共有数式をクリア（exceljsのShared Formula競合回避）
+    workbook.worksheets.forEach((sheet: any) => {
+      sheet.eachRow({ includeEmpty: false }, (row: any) => {
+        row.eachCell({ includeEmpty: false }, (cell: any) => {
+          if (cell._value && cell._value.model && cell._value.model.sharedFormula) {
+            const result = cell._value.model.result;
+            delete cell._value.model.sharedFormula;
+            cell._value.model.type = 2;
+            cell.value = result || 0;
+          }
+        });
       });
     });
+
+    // 使用シートのサンプルデータもクリア
+    for (let r = dataStart; r < dataStart + 20; r++) {
+      const row = ws.getRow(r);
+      if (row) {
+        [1, 2, 3, 4, 5, 37, 38, 39].forEach((c: number) => {
+          const cell = row.getCell(c);
+          if (cell && cell.value != null) cell.value = null;
+        });
+      }
+    }
 
     // データ注入（dataStart〜dataStart+19, 1-indexed）
     const usedSheetName = ws.name;
