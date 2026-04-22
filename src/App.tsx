@@ -497,7 +497,16 @@ function App() {
       </main>
 
       <footer className="text-center py-4 text-xs text-slate-400">
-        Mjup株式会社 — 行政書士システム MVP — 機密
+        <div className="max-w-2xl mx-auto mb-4 rounded-lg bg-amber-50 border border-amber-200 p-3 text-left">
+          <div className="text-xs font-bold text-amber-800 mb-1">⚠ β版（ベータ版）のご利用にあたって</div>
+          <ul className="text-[10px] text-amber-700 space-y-0.5">
+            <li>・この機能はβ版です。動作や出力に不具合がある場合があります</li>
+            <li>・最終提出前に必ず出力内容をご確認ください</li>
+            <li>・自治体独自様式・運用差分がある場合があります</li>
+            <li>・一部の自治体では厚労省標準様式での出力となる場合があります</li>
+          </ul>
+        </div>
+        Mjup株式会社 — 行政書士システム β版 — 機密
       </footer>
     </div>
   );
