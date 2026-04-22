@@ -39,8 +39,14 @@ app.get('/api/health', (_req, res) => {
 
 // 一覧
 app.get('/api/municipalities', async (_req, res) => {
-  const items = await prisma.municipality.findMany({ orderBy: { name: 'asc' } });
-  res.json({ items });
+  const items = await prisma.municipality.findMany({ orderBy: [{ prefecture: 'asc' }, { name: 'asc' }] });
+  // outputMappingからtypeを抽出してフロントに渡す
+  const enriched = items.map(m => {
+    let mappingType = null;
+    try { mappingType = m.outputMapping ? JSON.parse(m.outputMapping).type : null; } catch {}
+    return { ...m, mappingType };
+  });
+  res.json({ items: enriched });
 });
 
 // 作成

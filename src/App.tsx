@@ -12,7 +12,7 @@ import { exportToWorkbook, downloadWorkbook } from './exporter/exportToWorkbook'
 import { getSupportedServices, getServiceStandard, checkStaffingStandard } from './domain/staffingStandards';
 import type { StaffingCheckResult } from './domain/staffingStandards';
 
-interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; }
+interface MunicipalityItem { id: string; name: string; prefecture?: string; templateFile?: string; outputMapping?: string; mappingType?: string; }
 interface FacilityItem { id: string; name: string; facilityType?: string; inputMapping?: string; }
 
 type Step = 1 | 2 | 3;
@@ -227,10 +227,27 @@ function App() {
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="">-- 自治体を選択 --</option>
-                    {municipalities.map(m => (
-                      <option key={m.id} value={m.id}>{m.prefecture ? `${m.prefecture} ${m.name}` : m.name}</option>
-                    ))}
+                    {(() => {
+                      const grouped: Record<string, MunicipalityItem[]> = {};
+                      municipalities.forEach(m => {
+                        const key = m.prefecture || 'その他';
+                        if (!grouped[key]) grouped[key] = [];
+                        grouped[key].push(m);
+                      });
+                      return Object.entries(grouped).map(([pref, items]) => (
+                        <optgroup key={pref} label={pref}>
+                          {items.map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}{m.mappingType === 'MHLW_STANDARD' && m.name !== '厚労省' ? '' : ''}{!m.mappingType ? ' (未対応)' : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ));
+                    })()}
                   </select>
+                  {selectedMuni && selectedMuni.outputMapping?.includes('FALLBACK') && (
+                    <p className="text-[10px] text-amber-600 mt-1">⚠ この自治体は厚労省標準様式での出力です。自治体独自様式とは異なる場合があります。</p>
+                  )}
                 </div>
               </div>
               <details className="mt-3">
