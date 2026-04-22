@@ -222,16 +222,40 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
 
       // ヘッダー行を自動検出（氏名列を探す）
       if (ws) {
+        let bestHeaderRow = -1;
+        let bestMatchCount = 0;
         for (let r = 1; r <= 15; r++) {
           const row = ws.getRow(r);
-          let found = false;
+          let matchCount = 0;
           row.eachCell({ includeEmpty: false }, (cell: any) => {
-            if (String(cell.value || '').includes('氏名')) {
-              dataStart = r + 1;
-              found = true;
-            }
+            const val = String(cell.value || '').replace(/\s+/g, '');
+            if (/氏名|名前/.test(val)) matchCount++;
+            if (/職種|職名/.test(val)) matchCount++;
+            if (/勤務形態|勤務時間/.test(val)) matchCount++;
           });
-          if (found) break;
+          if (matchCount > bestMatchCount) {
+            bestMatchCount = matchCount;
+            bestHeaderRow = r;
+          }
+        }
+        if (bestHeaderRow > 0) {
+          // データ開始行 = ヘッダー行の2〜3行下（日付サブヘッダーがある場合）
+          // ヘッダー行の下にデータがあるか確認
+          for (let r = bestHeaderRow + 1; r <= bestHeaderRow + 5; r++) {
+            const row = ws.getRow(r);
+            let hasData = false;
+            row.eachCell({ includeEmpty: false }, (cell: any) => {
+              const val = String(cell.value || '').trim();
+              // 数字やサブヘッダー（日/曜）ではない実データを探す
+              if (val && !/^[日月火水木金土曜週]/.test(val) && val.length > 1) hasData = true;
+            });
+            if (!hasData) {
+              dataStart = r + 1;
+            } else {
+              dataStart = r;
+              break;
+            }
+          }
         }
       }
     }
@@ -268,19 +292,21 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
     // 非厚労省型の場合、列位置を自動検出
     let colMapping = { no: 1, position: 2, empType: 3, qualification: 4, name: 5, totalHours: 37, weeklyAvg: 38 };
     if (!isMhlwStandard) {
-      // ヘッダー行のセル値から列位置を推定
-      const headerRowNum = dataStart - 1;
-      const headerRow = ws.getRow(headerRowNum);
-      headerRow.eachCell({ includeEmpty: false }, (cell: any, colNumber: number) => {
-        const val = String(cell.value || '');
-        if (/氏名|名前/.test(val)) colMapping.name = colNumber;
-        if (/職種|職名/.test(val)) colMapping.position = colNumber;
-        if (/勤務形態|常勤.*非常勤/.test(val)) colMapping.empType = colNumber;
-        if (/資格/.test(val)) colMapping.qualification = colNumber;
-        if (/合計|勤務時間数/.test(val)) colMapping.totalHours = colNumber;
-        if (/週.*平均|週.*時間/.test(val)) colMapping.weeklyAvg = colNumber;
-        if (/No|番号/.test(val)) colMapping.no = colNumber;
-      });
+      // ヘッダー周辺の複数行からセル値を走査して列位置を推定
+      for (let scanRow = Math.max(1, dataStart - 4); scanRow < dataStart; scanRow++) {
+        const headerRow = ws.getRow(scanRow);
+        headerRow.eachCell({ includeEmpty: false }, (cell: any, colNumber: number) => {
+          const val = String(cell.value || '').replace(/\s+/g, '');
+          if (/氏名|名前/.test(val) && !colMapping.name) colMapping.name = colNumber;
+          if (/職種|職名/.test(val) && colMapping.position === 2) colMapping.position = colNumber;
+          if (/勤務形態|常勤.*非常勤/.test(val) && colMapping.empType === 3) colMapping.empType = colNumber;
+          if (/資格/.test(val) && colMapping.qualification === 4) colMapping.qualification = colNumber;
+          if (/合計/.test(val) && colMapping.totalHours === 37) colMapping.totalHours = colNumber;
+          if (/週平均|週.*時間/.test(val) && colMapping.weeklyAvg === 38) colMapping.weeklyAvg = colNumber;
+          if (/常勤換算/.test(val)) colMapping.weeklyAvg = colNumber; // 常勤換算列があれば週平均の代わりに使う
+          if (/^No\.?$|番号/.test(val) && colMapping.no === 1) colMapping.no = colNumber;
+        });
+      }
     }
 
     const templateType = isMhlwStandard ? 'MHLW_STANDARD' : 'AUTO_DETECT';
