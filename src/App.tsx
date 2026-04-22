@@ -24,6 +24,7 @@ function App() {
   const [error, setError] = useState('');
   const [confirmed, setConfirmed] = useState<Record<string, { weeklyHours: number; fte: number }> | null>(null);
   const [exported, setExported] = useState(false);
+  const [exportMeta, setExportMeta] = useState<{ sheetUsed?: string; autoFilled?: string[]; manualRequired?: string[] } | null>(null);
   const [selectedService, setSelectedService] = useState('');
   const [userCount, setUserCount] = useState(10);
 
@@ -139,10 +140,16 @@ function App() {
             schedule: parsed.schedule,
             confirmed,
             facilityName: selectedFacility?.name,
+            serviceCode: selectedService || undefined,
           }),
         });
         if (res.ok) {
           buf = await res.arrayBuffer();
+          setExportMeta({
+            sheetUsed: decodeURIComponent(res.headers.get('X-Sheet-Used') || ''),
+            autoFilled: decodeURIComponent(res.headers.get('X-Auto-Filled') || '').split(',').filter(Boolean),
+            manualRequired: decodeURIComponent(res.headers.get('X-Manual-Required') || '').split(',').filter(Boolean),
+          });
         } else {
           buf = await exportToWorkbook({ mapping: outputMapping, staff: staffList, confirmed });
         }
@@ -428,7 +435,38 @@ function App() {
               </button>
 
               {exported && (
-                <p className="text-sm text-emerald-600 font-medium">ファイルがダウンロードされました。</p>
+                <>
+                  <p className="text-sm text-emerald-600 font-medium">ファイルがダウンロードされました。</p>
+                  {exportMeta && (
+                    <div className="mt-4 text-left w-full max-w-md">
+                      {exportMeta.sheetUsed && (
+                        <div className="text-xs text-slate-600 mb-2">
+                          使用シート: <span className="font-medium">{exportMeta.sheetUsed}</span>
+                        </div>
+                      )}
+                      {exportMeta.autoFilled && exportMeta.autoFilled.length > 0 && (
+                        <div className="mb-2">
+                          <div className="text-xs font-semibold text-green-700 mb-1">🟢 自動入力済み</div>
+                          <div className="flex flex-wrap gap-1">
+                            {exportMeta.autoFilled.map((item, i) => (
+                              <span key={i} className="text-[10px] bg-green-50 text-green-700 rounded px-1.5 py-0.5 border border-green-200">{item}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {exportMeta.manualRequired && exportMeta.manualRequired.length > 0 && (
+                        <div>
+                          <div className="text-xs font-semibold text-amber-700 mb-1">🟡 手入力が必要</div>
+                          <div className="flex flex-wrap gap-1">
+                            {exportMeta.manualRequired.map((item, i) => (
+                              <span key={i} className="text-[10px] bg-amber-50 text-amber-700 rounded px-1.5 py-0.5 border border-amber-200">{item}</span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="flex gap-3 mt-4">

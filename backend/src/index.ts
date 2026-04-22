@@ -160,10 +160,43 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
 
-    const { staff, schedule, confirmed, facilityName, year, month, sheetName } = req.body;
+    const { staff, schedule, confirmed, facilityName, year, month, sheetName, serviceCode, dataStartRow: customDataStart } = req.body;
 
-    // シート選択
-    let ws = sheetName ? workbook.getWorksheet(sheetName) : null;
+    // シート選択（サービスコード→シート名マッピング）
+    const SHEET_MAP: Record<string, { sheet: string; dataStart: number }> = {
+      'GENERIC': { sheet: '勤務形態一覧表（汎用）', dataStart: 11 },
+      'HOME_CARE': { sheet: '勤務形態一覧表（居宅介護）', dataStart: 11 },
+      'SEVERE_HOME': { sheet: '勤務形態一覧表（重度訪問介護）', dataStart: 11 },
+      'ACCOMPANY': { sheet: '勤務形態一覧表（同行援護）', dataStart: 11 },
+      'BEHAVIOR': { sheet: '勤務形態一覧表（行動援護）', dataStart: 11 },
+      'MEDICAL_CARE': { sheet: '勤務形態一覧表（療養介護）', dataStart: 11 },
+      'LIFE_CARE': { sheet: '勤務形態一覧表（生活介護）', dataStart: 11 },
+      'FUNCTIONAL': { sheet: '勤務形態一覧表（機能訓練）', dataStart: 11 },
+      'LIFE_TRAINING': { sheet: '勤務形態一覧表（生活訓練）', dataStart: 11 },
+      'TRANSITION': { sheet: '勤務形態一覧表（就労移行支援）', dataStart: 11 },
+      'A_B_CONTINUOUS': { sheet: '勤務形態一覧表（就労継続支援A型・B型）', dataStart: 11 },
+      'RETENTION': { sheet: '勤務形態一覧表（就労定着支援）', dataStart: 11 },
+      'INDEPENDENT': { sheet: '勤務形態一覧表（自立生活援助）', dataStart: 11 },
+      'GH_INCLUSIVE': { sheet: '勤務形態一覧表（共同生活援助・介護サービス包括型）', dataStart: 11 },
+      'GH_EXTERNAL': { sheet: '勤務形態一覧表（共同生活援助・外部サービス利用型）', dataStart: 11 },
+      'GH_DAYTIME': { sheet: '勤務形態一覧表（共同生活援助・日中サービス支援型', dataStart: 11 },
+      'FACILITY': { sheet: '勤務形態一覧表（障害者支援施設）', dataStart: 11 },
+      'GENERAL_CONSULT': { sheet: '勤務形態一覧表（一般相談支援）', dataStart: 11 },
+      'SPECIFIC_CONSULT': { sheet: '勤務形態一覧（特定相談支援・障害児相談支援）', dataStart: 11 },
+      'CHILD_AFTER_SCHOOL': { sheet: '勤務形態一覧表（児童発達支援・放課後デイサービス）', dataStart: 12 },
+      'CHILD_SEVERE': { sheet: '勤務形態一覧表（児童発達支援・主として重症心身障害児）', dataStart: 12 },
+      'CHILD_CENTER': { sheet: '勤務形態一覧表（児童発達支援センター）', dataStart: 12 },
+      'CHILD_HOME_VISIT': { sheet: '勤務形態一覧表（居宅訪問型児童発達支援）', dataStart: 11 },
+      'CHILD_NURSERY_VISIT': { sheet: '勤務形態一覧表（保育所等訪問支援）', dataStart: 11 },
+      'CHILD_WELFARE_FACILITY': { sheet: '勤務形態一覧表（福祉型障害児入所施設）', dataStart: 11 },
+      'CHILD_MEDICAL_FACILITY': { sheet: '勤務形態一覧表（医療型障害児入所施設）', dataStart: 11 },
+    };
+
+    const mapped = serviceCode ? SHEET_MAP[serviceCode] : null;
+    const targetSheetName = sheetName || mapped?.sheet;
+    const dataStart = customDataStart || mapped?.dataStart || 11;
+
+    let ws = targetSheetName ? workbook.getWorksheet(targetSheetName) : null;
     if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('汎用'));
     if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('勤務形態'));
     if (!ws) ws = workbook.worksheets[0];
@@ -196,10 +229,14 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
       });
     });
 
-    // データ注入（Row 11〜30, 1-indexed）
+    // データ注入（dataStart〜dataStart+19, 1-indexed）
+    const usedSheetName = ws.name;
+    const filledItems = ['No.', '氏名', '職種', '勤務形態', '日別勤務時間', '勤務時間合計', '週平均勤務時間', '年月', '事業所名'];
+    const manualItems = ['資格', '兼務状況', '記載期間', '予定/実績の別', '常勤の勤務すべき時間数'];
+
     (staff || []).forEach((s: any, index: number) => {
       if (index >= 20) return;
-      const row = 11 + index;
+      const row = dataStart + index;
 
       ws.getCell(`A${row}`).value = index + 1;
       ws.getCell(`B${row}`).value = s.position || '';
@@ -235,8 +272,13 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
 
     // バッファとして返す
     const buffer = await workbook.xlsx.writeBuffer();
+    // メタ情報をヘッダーに含める
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(muni.name + '_勤務体制一覧.xlsx')}`);
+    res.setHeader('X-Sheet-Used', encodeURIComponent(usedSheetName));
+    res.setHeader('X-Auto-Filled', encodeURIComponent(filledItems.join(',')));
+    res.setHeader('X-Manual-Required', encodeURIComponent(manualItems.join(',')));
+    res.setHeader('X-Staff-Count', String((staff || []).length));
     res.send(Buffer.from(buffer));
   } catch (e) {
     console.error('Export error:', e);
