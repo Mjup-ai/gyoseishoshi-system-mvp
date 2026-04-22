@@ -197,13 +197,45 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
       'CHILD_MEDICAL_FACILITY': { sheet: '勤務形態一覧表（医療型障害児入所施設）', dataStart: 11 },
     };
 
-    const mapped = serviceCode ? SHEET_MAP[serviceCode] : null;
-    const targetSheetName = sheetName || mapped?.sheet;
-    const dataStart = customDataStart || mapped?.dataStart || 11;
+    // テンプレの構造を自動判定
+    const isMhlwStandard = workbook.worksheets.length > 5 &&
+      workbook.worksheets.some((s: any) => s.name.includes('汎用') || s.name.includes('勤務形態'));
 
-    let ws = targetSheetName ? workbook.getWorksheet(targetSheetName) : null;
-    if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('汎用'));
-    if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('勤務形態'));
+    let ws: any = null;
+    let dataStart = customDataStart || 11;
+
+    if (isMhlwStandard) {
+      // 厚労省準拠型: サービスコードでシートを選択
+      const mapped = serviceCode ? SHEET_MAP[serviceCode] : null;
+      const targetSheetName = sheetName || mapped?.sheet;
+      dataStart = mapped?.dataStart || 11;
+
+      ws = targetSheetName ? workbook.getWorksheet(targetSheetName) : null;
+      if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('汎用'));
+      if (!ws) ws = workbook.worksheets.find((s: any) => s.name.includes('勤務形態'));
+    } else {
+      // 非厚労省型: 勤務形態系のシートを探す or 最初のシートを使う
+      ws = workbook.worksheets.find((s: any) =>
+        s.name.includes('勤務形態') || s.name.includes('勤務体制') || s.name.includes('勤務')
+      );
+      if (!ws) ws = workbook.worksheets[0];
+
+      // ヘッダー行を自動検出（氏名列を探す）
+      if (ws) {
+        for (let r = 1; r <= 15; r++) {
+          const row = ws.getRow(r);
+          let found = false;
+          row.eachCell({ includeEmpty: false }, (cell: any) => {
+            if (String(cell.value || '').includes('氏名')) {
+              dataStart = r + 1;
+              found = true;
+            }
+          });
+          if (found) break;
+        }
+      }
+    }
+
     if (!ws) ws = workbook.worksheets[0];
     if (!ws) return res.status(400).json({ error: 'シートが見つかりません' });
 
@@ -232,6 +264,26 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
       if (!scheduleMap[e.staffId]) scheduleMap[e.staffId] = {};
       scheduleMap[e.staffId][e.date] = e;
     });
+
+    // 非厚労省型の場合、列位置を自動検出
+    let colMapping = { no: 1, position: 2, empType: 3, qualification: 4, name: 5, totalHours: 37, weeklyAvg: 38 };
+    if (!isMhlwStandard) {
+      // ヘッダー行のセル値から列位置を推定
+      const headerRowNum = dataStart - 1;
+      const headerRow = ws.getRow(headerRowNum);
+      headerRow.eachCell({ includeEmpty: false }, (cell: any, colNumber: number) => {
+        const val = String(cell.value || '');
+        if (/氏名|名前/.test(val)) colMapping.name = colNumber;
+        if (/職種|職名/.test(val)) colMapping.position = colNumber;
+        if (/勤務形態|常勤.*非常勤/.test(val)) colMapping.empType = colNumber;
+        if (/資格/.test(val)) colMapping.qualification = colNumber;
+        if (/合計|勤務時間数/.test(val)) colMapping.totalHours = colNumber;
+        if (/週.*平均|週.*時間/.test(val)) colMapping.weeklyAvg = colNumber;
+        if (/No|番号/.test(val)) colMapping.no = colNumber;
+      });
+    }
+
+    const templateType = isMhlwStandard ? 'MHLW_STANDARD' : 'AUTO_DETECT';
 
     // 使用しないシートのサンプルデータをクリア
     workbook.worksheets.forEach((sheet: any) => {
@@ -285,12 +337,12 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
       if (index >= 20) return;
       const row = dataStart + index;
 
-      ws.getCell(`A${row}`).value = index + 1;
-      ws.getCell(`B${row}`).value = s.position || '';
+      ws.getCell(row, colMapping.no).value = index + 1;
+      ws.getCell(row, colMapping.position).value = s.position || '';
       const empType = s.employmentType?.includes('非常勤') ? 'C' : s.isDedicated === false ? 'B' : 'A';
-      ws.getCell(`C${row}`).value = empType;
-      ws.getCell(`D${row}`).value = s.qualification || '';
-      ws.getCell(`E${row}`).value = s.name;
+      ws.getCell(row, colMapping.empType).value = empType;
+      ws.getCell(row, colMapping.qualification).value = s.qualification || '';
+      ws.getCell(row, colMapping.name).value = s.name;
 
       // 日ごとの勤務時間
       const staffSched = scheduleMap[s.id] || {};
@@ -305,15 +357,11 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
         dayIndex++;
       });
 
-      // 合計・週平均（共有数式をクリアしてから値を入れる）
+      // 合計・週平均
       const conf = confirmed?.[s.id];
       if (conf) {
-        const akCell = ws.getCell(`AK${row}`);
-        akCell.value = conf.weeklyHours * 4;
-        delete (akCell as any).sharedFormula;
-        const alCell = ws.getCell(`AL${row}`);
-        alCell.value = conf.weeklyHours;
-        delete (alCell as any).sharedFormula;
+        ws.getCell(row, colMapping.totalHours).value = conf.weeklyHours * 4;
+        ws.getCell(row, colMapping.weeklyAvg).value = conf.weeklyHours;
       }
     });
 
@@ -326,6 +374,7 @@ app.post('/api/municipalities/:id/export', express.json({ limit: '5mb' }), async
     res.setHeader('X-Auto-Filled', encodeURIComponent(filledItems.join(',')));
     res.setHeader('X-Manual-Required', encodeURIComponent(manualItems.join(',')));
     res.setHeader('X-Staff-Count', String((staff || []).length));
+    res.setHeader('X-Template-Type', templateType);
     res.send(Buffer.from(buffer));
   } catch (e) {
     console.error('Export error:', e);
